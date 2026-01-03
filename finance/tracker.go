@@ -10,12 +10,16 @@ type RateChange struct {
 	Rate float64
 }
 
+const (
+	StartColourGreen = "\033[32m"
+	StartColourAmber = "\033[38;5;208m"
+	StopColouring    = "\033[0m"
+)
+
 func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []RateChange) {
 	fmt.Println("=== MODE 2: Loan Tracker ===")
 
 	now := time.Now()
-
-	endDate := details.StartDate.AddDate(0, details.LoanLengthMonths, 0)
 
 	getRateAtDate := func(dateInQuestion time.Time) float64 {
 		currentRate := details.InterestRate
@@ -27,87 +31,126 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 		return currentRate
 	}
 
-	startOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+	totalMonthsElapsed := CalculateMonthsElapsedAtDate(details.StartDate, now)
 
-	trackFrom := startOfYear
-	if details.StartDate.After(startOfYear) {
-		trackFrom = details.StartDate
+	if totalMonthsElapsed > details.LoanLengthMonths {
+		totalMonthsElapsed = details.LoanLengthMonths
 	}
 
-	var expectedInterestYTD float64
-
-	monthsToCalculate := 0
-	if now.After(trackFrom) {
-		monthsToCalculate = int(now.Month()) - int(trackFrom.Month())
-		if now.Year() > trackFrom.Year() {
-			monthsToCalculate = int(now.Month())
-		}
-	}
+	percentageProgress := (float64(totalMonthsElapsed) / float64(details.LoanLengthMonths)) * 100.0
 
 	monthlyCorePayment := details.TotalLoanAmount / float64(details.LoanLengthMonths)
 
-	for i := 0; i < monthsToCalculate; i++ {
-		calcDate := trackFrom.AddDate(0, i, 0)
-
-		rateForMonth := getRateAtDate(calcDate)
-
-		totalMonthsElapsed := CalculateMonthsElapsedAtDate(details.StartDate, calcDate)
-		coreRepaid := monthlyCorePayment * float64(totalMonthsElapsed)
-		outstanding := details.TotalLoanAmount - coreRepaid
-		if outstanding < 0 {
-			outstanding = 0
-		}
-
-		monthlyInt := outstanding * (rateForMonth / 100) / 12.0
-		expectedInterestYTD += monthlyInt
-	}
-
-	currentRate := getRateAtDate(now)
-	totalMonthsElapsed := CalculateMonthsElapsedAtDate(details.StartDate, now)
 	coreRepaidTotal := monthlyCorePayment * float64(totalMonthsElapsed)
+
 	outstandingCoreNow := details.TotalLoanAmount - coreRepaidTotal
 	if outstandingCoreNow < 0 {
 		outstandingCoreNow = 0
 	}
 
-	currentMonthlyCost := outstandingCoreNow * (currentRate / 100) / 12.0
+	startOfCurrentYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 
-	monthsLeftInYear := 12 - int(now.Month()) + 1
+	var interestPaidPreviousYears float64
 
-	var liabilityForRestOfYear float64
+	if details.StartDate.Before(startOfCurrentYear) {
+		monthsPrior := CalculateMonthsElapsedAtDate(details.StartDate, startOfCurrentYear)
+
+		for i := 0; i < monthsPrior; i++ {
+			calcDate := details.StartDate.AddDate(0, i, 0)
+
+			rate := getRateAtDate(calcDate)
+
+			cRepaid := monthlyCorePayment * float64(i)
+			cOutstanding := details.TotalLoanAmount - cRepaid
+
+			mInt := cOutstanding * (rate / 100.0) / 12.0
+			interestPaidPreviousYears += mInt
+		}
+	}
+
+	totalInterestPaidLifetime := interestPaidPreviousYears + interestPaidYTD
+	totalPaidLifetime := coreRepaidTotal + totalInterestPaidLifetime
+
+	var expectedInterestYTD float64
+
+	trackFrom := startOfCurrentYear
+	if details.StartDate.After(startOfCurrentYear) {
+		trackFrom = details.StartDate
+	}
+
+	monthsToCalculateYTD := 0
+	if now.After(trackFrom) {
+		monthsToCalculateYTD = int(now.Month()) - int(trackFrom.Month())
+		if now.Year() > trackFrom.Year() {
+			monthsToCalculateYTD = int(now.Month()) // Handle Dec -> Jan crossover edge case
+		}
+	}
+
+	for i := 0; i < monthsToCalculateYTD; i++ {
+		calcDate := trackFrom.AddDate(0, i, 0)
+		rateForMonth := getRateAtDate(calcDate)
+
+		monthsFromStart := CalculateMonthsElapsedAtDate(details.StartDate, calcDate)
+
+		coreRepaid := monthlyCorePayment * float64(monthsFromStart)
+		outstanding := details.TotalLoanAmount - coreRepaid
+
+		monthlyInt := outstanding * (rateForMonth / 100.0) / 12.0
+		expectedInterestYTD += monthlyInt
+	}
+
+	currentRate := getRateAtDate(now)
+	monthsRemaining := details.LoanLengthMonths - totalMonthsElapsed
+
+	var projectedRemainingInterest float64
 	tempCore := outstandingCoreNow
 
-	for i := 0; i < monthsLeftInYear; i++ {
-		futureDate := now.AddDate(0, i, 0)
-		if futureDate.After(endDate) {
-			break
-		}
-
-		mInt := tempCore * (currentRate / 100) / 12.0
-		liabilityForRestOfYear += mInt
-
+	for i := 0; i < monthsRemaining; i++ {
+		mInt := tempCore * (currentRate / 100.0) / 12.0
+		projectedRemainingInterest += mInt
 		tempCore -= monthlyCorePayment
 	}
 
+	totalOutstanding := outstandingCoreNow + projectedRemainingInterest
+
 	balance := expectedInterestYTD - interestPaidYTD
+
+	monthsLeftInYear := 12 - int(now.Month()) + 1
+	var liabilityForRestOfYear float64
+	tempCoreYear := outstandingCoreNow
+	for i := 0; i < monthsLeftInYear; i++ {
+		if i >= monthsRemaining {
+			break
+		}
+		mInt := tempCoreYear * (currentRate / 100.0) / 12.0
+		liabilityForRestOfYear += mInt
+		tempCoreYear -= monthlyCorePayment
+	}
+
+	PrintSeparator()
+	fmt.Printf(" Loan Progress:			%d / %d months (%.1f%%)\n", totalMonthsElapsed, details.LoanLengthMonths, percentageProgress)
+	PrintSeparator()
+	fmt.Println(" PAID SO FAR (Lifetime):")
+	fmt.Printf(" - Total Paid:			%s\n", FormatCurrency(totalPaidLifetime))
+	fmt.Printf("   - Core:			%s\n", FormatCurrency(coreRepaidTotal))
+	fmt.Printf("   - Interest:			%s\n", FormatCurrency(totalInterestPaidLifetime))
+	PrintSeparator()
+	fmt.Println(" REMAINING PREDICTION (Assumes current rate holds):")
+	fmt.Printf(" - Total Outstanding:		%s\n", FormatCurrency(totalOutstanding))
+	fmt.Printf("   - Core:			%s\n", FormatCurrency(outstandingCoreNow))
+	fmt.Printf("   - Interest:			%s\n", FormatCurrency(projectedRemainingInterest))
+	PrintSeparator()
+	fmt.Printf(" Current Interest Rate:		%.2f%%\n", currentRate)
+	PrintSeparator()
+	fmt.Printf(" Tracking Period:		%s to Now (%d billed months)\n", trackFrom.Format("Jan 2006"), monthsToCalculateYTD)
+	fmt.Printf(" Expected Interest YTD:		%s\n", FormatCurrency(expectedInterestYTD))
+	fmt.Printf(" Interest Paid YTD:		%s\n", FormatCurrency(interestPaidYTD))
+	PrintSeparator()
+
 	tolerance := 0.05
-
-	PrintSeparator()
-	fmt.Printf("Loan start date:		%s\n", details.StartDate.Format("2006-01-02"))
-	fmt.Printf("Loan end date:			%s\n", endDate.Format("2006-01-02"))
-	PrintSeparator()
-	fmt.Printf("Loan Progress:			%d / %d months\n", totalMonthsElapsed, details.LoanLengthMonths)
-	fmt.Printf("Outstanding Core:		%s\n", FormatCurrency(outstandingCoreNow))
-	fmt.Printf("Current Interest Rate:		%.2f%%\n", currentRate)
-	PrintSeparator()
-	fmt.Printf("Tracking Period:		%s to Now (%d billed months)\n", trackFrom.Format("Jan 2006"), monthsToCalculate)
-	fmt.Printf("Expected Interest YTD:		%s\n", FormatCurrency(expectedInterestYTD))
-	fmt.Printf("Interest Paid YTD:		%s\n", FormatCurrency(interestPaidYTD))
-	PrintSeparator()
-
 	if balance > tolerance {
-		fmt.Println("STATUS: [RUNNING BEHIND]")
-		fmt.Printf("Arrears (YTD):				%s\n", FormatCurrency(balance))
+		fmt.Println(" STATUS: " + MakeThisAmber("[RUNNING BEHIND]"))
+		fmt.Printf(" Arrears (YTD):%s\n", FormatCurrency(balance))
 
 		totalLumpSum := balance + liabilityForRestOfYear
 
@@ -120,112 +163,24 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 			fmt.Printf("- alternatively increase monthly interest payments to %s\n", FormatCurrency(monthlyCatchup))
 		}
 	} else {
-		fmt.Println("STATUS: [ON TRACK]")
-		fmt.Printf("You are covering the YTD interest requirements!\n")
-		fmt.Printf("Projected new monthly cost:	%s\n", FormatCurrency(currentMonthlyCost))
+		fmt.Println(" STATUS: " + MakeThisGreen("[ON TRACK]"))
+		fmt.Println(" You are covering the YTD interest requirements!")
+
+		currentMonthlyCost := outstandingCoreNow * (currentRate / 100.0) / 12.0
+		fmt.Printf(" Projected Monthly Cost:	%s\n", FormatCurrency(currentMonthlyCost))
 
 		surplus := -balance
 		if surplus > tolerance {
-			fmt.Printf("You have a YTD surplus of:	%s\n", FormatCurrency(surplus))
+			fmt.Printf(" (You have a YTD surplus of:%s)\n", FormatCurrency(surplus))
 		}
 	}
 	PrintSeparator()
 }
 
-//func RunTrackerMode(details LoanDetails, interestPaidSoFar float64) {
-//	fmt.Println("=== MODE 2: Loan Tracker ===")
-//
-//	monthsElapsed := CalculateMonthsElapsed(details.StartDate)
-//	if monthsElapsed > details.LoanLengthMonths {
-//		monthsElapsed = details.LoanLengthMonths
-//	}
-//	monthsRemaining := details.LoanLengthMonths - monthsElapsed
-//	endDate := details.StartDate.AddDate(0, details.LoanLengthMonths, 0)
-//
-//	monthlyCorePayment := details.TotalLoanAmount / float64(details.LoanLengthMonths)
-//	coreRepaidSoFar := monthlyCorePayment * float64(monthsElapsed)
-//	outstandingCore := details.TotalLoanAmount - coreRepaidSoFar
-//
-//	if outstandingCore < 0 {
-//		outstandingCore = 0
-//	}
-//
-//	currentAnnualInterest := outstandingCore * (details.InterestRate / 100.0)
-//	currentMonthlyInterestCost := currentAnnualInterest / 12.0
-//
-//	var projectedRemainingInterest float64
-//	tempCore := outstandingCore
-//	for i := 0; i < monthsRemaining; i++ {
-//		monthlyInt := tempCore * (details.InterestRate / 100.0) / 12.0
-//		projectedRemainingInterest += monthlyInt
-//		tempCore -= monthlyCorePayment
-//	}
-//
-//	now := time.Now()
-//
-//	var totalExpectedToDate float64
-//	p := details.TotalLoanAmount
-//	for i := 0; i < monthsElapsed; i++ {
-//		mInt := p * (details.InterestRate / 100.0) / 12.0
-//		totalExpectedToDate += mInt
-//		p -= monthlyCorePayment
-//	}
-//
-//	balance := totalExpectedToDate - interestPaidSoFar
-//
-//	PrintSeparator()
-//	fmt.Printf("Loan start date:            %s\n", details.StartDate.Format("2006-01-02"))
-//	fmt.Printf("Loan end date:                 %s\n", endDate.Format("2006-01-02"))
-//	PrintSeparator()
-//	fmt.Printf("Loan progress:                 %d / %d months\n", monthsElapsed, details.LoanLengthMonths)
-//	fmt.Printf("Core repaid so far:             £%.2f\n", coreRepaidSoFar)
-//	fmt.Printf("Outstanding core:           £%.2f\n", outstandingCore)
-//	PrintSeparator()
-//	fmt.Printf("Current interest rate:           %.2f%%\n", details.InterestRate)
-//	fmt.Printf("New monthly interest:        £%.2f (based on outstanding balance)\n", currentMonthlyInterestCost)
-//	fmt.Printf("Projected remaining interest:  £%.2f\n", projectedRemainingInterest)
-//	PrintSeparator()
-//
-//	monthsLeftInYear := 12 - int(now.Month()) + 1
-//
-//	var liabilityForRestOfYear float64
-//	tempCoreForYear := outstandingCore
-//	for i := 0; i < monthsLeftInYear; i++ {
-//		if i >= monthsRemaining {
-//			break
-//		}
-//
-//		mInt := tempCoreForYear * (details.InterestRate / 100.0) / 12.0
-//		liabilityForRestOfYear += mInt
-//		tempCoreForYear -= monthlyCorePayment
-//	}
-//
-//	tolerance := 0.05
-//
-//	if balance > tolerance {
-//		fmt.Println("STATUS: [RUNNING BEHIND]")
-//		fmt.Printf("Estimated arrears based on current rate: £%.2f\n", balance)
-//
-//		totalLumpSum := balance + liabilityForRestOfYear
-//
-//		fmt.Println("\n--- Correction plan ---")
-//		fmt.Printf("To clear arrears and cover the rest of %d:\n", now.Year())
-//		fmt.Printf("- Pay a total lump sum of £%.2f by December 31st", totalLumpSum)
-//
-//		if monthsLeftInYear > 0 {
-//			monthlyCatchup := totalLumpSum / float64(monthsLeftInYear)
-//			fmt.Printf("- Alternatively increase monthly payments to £%.2f\n", monthlyCatchup)
-//		} else {
-//			fmt.Println("(No months left in year for catchup payments")
-//		}
-//	} else {
-//		fmt.Println("STATUS [ON TRACK]")
-//		fmt.Println("Looks like you're covering the interest requirements!")
-//		fmt.Printf("Expected monthly interest cost: £%.2f\n", currentMonthlyInterestCost)
-//
-//		surplus := -balance
-//		if surplus > tolerance {
-//			fmt.Printf("(You have a surplus of £%.2f)\n", surplus)
-//		}
-//	}
-//}
+func MakeThisGreen(text string) string {
+	return StartColourGreen + text + StopColouring
+}
+
+func MakeThisAmber(text string) string {
+	return StartColourAmber + text + StopColouring
+}
