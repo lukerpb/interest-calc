@@ -1,6 +1,6 @@
 {
-  "totalLoanAmount": 19000.00,
-  "interestRate": 3.75,
-  "loanLengthMonths": 12,
-  "startDate": "2026-12-01"
+	"totalLoanAmount": 19000.00,
+	"interestRate": 3.75,
+	"loanLengthMonths": 12,
+	"startDate": "2026-12-01"
 }

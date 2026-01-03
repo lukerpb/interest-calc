@@ -1,7 +1,9 @@
 package finance
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -16,21 +18,56 @@ func RoundTo2DP(val float64) float64 {
 	return math.Round(val*100) / 100
 }
 
-func CalculateTotalInterestFlat(details LoanDetails) float64 {
+func CalculateTotalCompoundInterest(details LoanDetails) float64 {
 	years := float64(details.LoanLengthMonths) / 12.0
-	interest := details.TotalLoanAmount * (details.InterestRate / 100.0) * years
+	rateAsDecimal := details.InterestRate / 100.0
+
+	totalRepayable := details.TotalLoanAmount * math.Pow(1+rateAsDecimal, years)
+	interest := totalRepayable - details.TotalLoanAmount
+
 	return RoundTo2DP(interest)
 }
 
-func CalculateMonthsElapsed(start time.Time) int {
-	now := time.Now()
-	if now.Before(start) {
+//
+//func CalculateMonthsElapsed(start time.Time) int {
+//	return CalculateMonthsElapsedAtDate(start, time.Now())
+//}
+
+func CalculateMonthsElapsedAtDate(start, target time.Time) int {
+	if target.Before(start) {
 		return 0
 	}
+	years := target.Year() - start.Year()
+	months := int(target.Month()) - int(start.Month())
+	return (years * 12) + months
+}
 
-	years := now.Year() - start.Year()
-	months := int(now.Month()) - int(start.Month())
+func FormatCurrency(amount float64) string {
+	rounded := RoundTo2DP(amount)
+	pounds := int64(rounded)
+	pennies := int64(math.Round((rounded - float64(pounds)) * 100))
+	if pennies < 0 {
+		pennies = -pennies
+	}
 
-	totalMonths := (years * 12) + months
-	return totalMonths
+	poundString := fmt.Sprintf("%d", pounds)
+	var result []string
+	for i, c := range reverse(poundString) {
+		if i > 0 && i%3 == 0 {
+			result = append(result, ",")
+		}
+		result = append(result, c)
+	}
+	withCommas := strings.Join(reverse(strings.Join(result, "")), "")
+
+	paddedPoundAmount := fmt.Sprintf("%9s", withCommas)
+	return fmt.Sprintf("£%s.%02d", paddedPoundAmount, pennies)
+}
+
+func reverse(s string) []string {
+	var r []string
+	for _, c := range s {
+		r = append([]string{string(c)}, r...)
+	}
+	return r
 }
