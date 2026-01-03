@@ -13,8 +13,10 @@ func RunPlannerMode(details LoanDetails) {
 	endDate := details.StartDate.AddDate(0, details.LoanLengthMonths, 0)
 
 	exactMonthlyPayment := totalPayable / float64(details.LoanLengthMonths)
+	// Round up to the nearest penny to ensure we cover the total amount across all payments
 	standardMonthlyTotal := math.Ceil(exactMonthlyPayment*100) / 100
 
+	// Any rounding discrepancy is resolved in the final payment to ensure the exact total is repaid
 	paymentsExcludingLastOne := standardMonthlyTotal * float64(details.LoanLengthMonths-1)
 	lastMonthPayment := totalPayable - paymentsExcludingLastOne
 	lastMonthPayment = math.Round(lastMonthPayment*100) / 100

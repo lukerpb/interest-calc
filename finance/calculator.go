@@ -22,16 +22,12 @@ func CalculateTotalCompoundInterest(details LoanDetails) float64 {
 	years := float64(details.LoanLengthMonths) / 12.0
 	rateAsDecimal := details.InterestRate / 100.0
 
+	// Calculate total amount using the annual compound interest formula: A = P(1 + r)^t
 	totalRepayable := details.TotalLoanAmount * math.Pow(1+rateAsDecimal, years)
 	interest := totalRepayable - details.TotalLoanAmount
 
 	return RoundTo2DP(interest)
 }
-
-//
-//func CalculateMonthsElapsed(start time.Time) int {
-//	return CalculateMonthsElapsedAtDate(start, time.Now())
-//}
 
 func CalculateMonthsElapsedAtDate(start, target time.Time) int {
 	if target.Before(start) {
@@ -52,14 +48,17 @@ func FormatCurrency(amount float64) string {
 
 	poundString := fmt.Sprintf("%d", pounds)
 	var result []string
+	// Reverse the string to easily insert thousand separators every 3 digits
 	for i, c := range reverse(poundString) {
 		if i > 0 && i%3 == 0 {
 			result = append(result, ",")
 		}
 		result = append(result, c)
 	}
+	// Re-reverse to restore the original order with commas included
 	withCommas := strings.Join(reverse(strings.Join(result, "")), "")
 
+	// Pad to ensure numerical alignment in console output
 	paddedPoundAmount := fmt.Sprintf("%9s", withCommas)
 	return fmt.Sprintf("£%s.%02d", paddedPoundAmount, pennies)
 }

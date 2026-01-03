@@ -23,6 +23,7 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 
 	getRateAtDate := func(dateInQuestion time.Time) float64 {
 		currentRate := details.InterestRate
+		// Iterate through history to find the most recent rate applicable to the given date
 		for _, change := range rateHistory {
 			if change.Date.Before(dateInQuestion) || change.Date.Equal(dateInQuestion) {
 				currentRate = change.Rate
@@ -55,11 +56,14 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 	if details.StartDate.Before(startOfCurrentYear) {
 		monthsPrior := CalculateMonthsElapsedAtDate(details.StartDate, startOfCurrentYear)
 
+		// Calculate total interest accrued in previous years by iterating through each month.
+		// This accounts for both historical interest rate changes and the decreasing core balance.
 		for i := 0; i < monthsPrior; i++ {
 			calcDate := details.StartDate.AddDate(0, i, 0)
 
 			rate := getRateAtDate(calcDate)
 
+			// Simple model: assume core is repaid linearly each month
 			cRepaid := monthlyCorePayment * float64(i)
 			cOutstanding := details.TotalLoanAmount - cRepaid
 
@@ -82,7 +86,9 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 	if now.After(trackFrom) {
 		monthsToCalculateYTD = int(now.Month()) - int(trackFrom.Month())
 		if now.Year() > trackFrom.Year() {
-			monthsToCalculateYTD = int(now.Month()) // Handle Dec -> Jan crossover edge case
+			// If we are in January of a new year, but tracking from a previous year's start,
+			// this handles the simple count of months for the current calendar year.
+			monthsToCalculateYTD = int(now.Month())
 		}
 	}
 
@@ -115,6 +121,8 @@ func RunTrackerMode(details LoanDetails, interestPaidYTD float64, rateHistory []
 
 	balance := expectedInterestYTD - interestPaidYTD
 
+	// Estimate interest liability for the remaining months of the current calendar year.
+	// This is used to suggest a catch-up payment if the user is currently in arrears.
 	monthsLeftInYear := 12 - int(now.Month()) + 1
 	var liabilityForRestOfYear float64
 	tempCoreYear := outstandingCoreNow

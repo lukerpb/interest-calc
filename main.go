@@ -35,6 +35,7 @@ func main() {
 
 	cfg := loadConfig("config.json")
 
+	// Command-line flags take precedence over values in config.json
 	finalAmount := resolveFloat(*amount, cfg.TotalLoanAmount)
 	finalRate := resolveFloat(*rate, cfg.InterestRate)
 	finalMonths := resolveInt(*months, cfg.LoanLengthMonths)
@@ -80,6 +81,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Process historical rate changes from the configuration file.
+		// These are used to calculate accrued interest when rates have fluctuated over time.
 		for _, rateChange := range cfg.RateChanges {
 			date, err := time.Parse("2006-01-02", rateChange.WhenRateChanged)
 			if err != nil {
